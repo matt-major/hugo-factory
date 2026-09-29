@@ -1,9 +1,16 @@
 # Hugo Factory
 
 A software factory: prompt-defined agents that take work from intake to pull
-request. Each role's full spec lives in `agents/<role>/agent.md` (frontmatter
-`description` + a Markdown system prompt) — read those for what each agent
-actually does.
+request. Each supported tool has its own copy of the agents, in that tool's
+native format, with models chosen for that tool:
+
+| Folder | For |
+| --- | --- |
+| `claude/agents/` | [Claude Code](https://code.claude.com) |
+| `codex/` | [Codex CLI](https://github.com/openai/codex) |
+| `copilot/agents/` | [GitHub Copilot CLI](https://github.com/github/copilot-cli) |
+
+Read a role's file for what it actually does.
 
 | Role | Does |
 | --- | --- |
@@ -15,46 +22,53 @@ actually does.
 
 ## Requirements
 
-- Bash, and Python 3 for the Codex install.
-- At least one of: [Claude Code](https://code.claude.com),
-  [Codex CLI](https://github.com/openai/codex), or
-  [GitHub Copilot CLI](https://github.com/github/copilot-cli).
+- At least one of Claude Code, Codex CLI, or GitHub Copilot CLI.
+- Bash, for the install script.
 - Access to the repository's forge and issue tracker from that tool (for
   example the `gh` CLI or an MCP server), so the agents can open PRs and
   update issues.
 
 ## Install
 
+Clone this repository, then run the install script from the project you want
+to use the factory in:
+
 ```bash
-scripts/install.sh <claude-code|codex|copilot|all>
+./install.sh
 ```
 
-This installs the agents into your user-level agent directory, so they are
-available in every project:
+It asks where to install the agents:
 
-| Platform | Installs to |
+- **Project** (the default): into the current project (its git root, or the
+  current directory outside a git repository), so you can commit them and
+  share them with your team.
+- **Global**: into your home directory, so they are available in every
+  project.
+
+| Tool | Project | Global |
+| --- | --- | --- |
+| Claude Code | `.claude/agents/` | `~/.claude/agents/` |
+| Codex CLI | `.codex/agents/`, plus the Hugo profile globally | `~/.codex/agents/` and `~/.codex/hugo.config.toml` |
+| Copilot CLI | `.github/agents/` | `~/.copilot/agents/` |
+
+It installs for every supported tool on your `PATH`. To install for specific
+tools only, name them: `install.sh claude codex`.
+
+| Option | Does |
 | --- | --- |
-| Claude Code | `~/.claude/agents/<role>.md` |
-| Codex CLI | `~/.codex/agents/<role>.toml`, plus `~/.codex/hugo.md` |
-| Copilot CLI | `~/.copilot/agents/<role>.agent.md` |
+| `-g`, `--global` | Install globally, without asking. |
+| `-p`, `--project` | Install into the current project, without asking. |
+| `-y`, `--yes` | Don't ask; install into the current project unless `-g` is given. The script also doesn't ask when its input isn't a terminal. |
+| `--link` | Symlink the files instead of copying them, so a `git pull` of this repository updates the installed agents. Don't commit symlinked agents to a project; they point into your clone. |
 
-Re-run after editing any `agents/*/agent.md` to keep the installed copies in
-sync. The scripts convert each spec into the target platform's native format.
-They overwrite the installed files each run, and they don't remove the files
-of a role you have deleted.
+By default the script copies the files, so run it again after you pull
+changes. It overwrites installed copies of these agents, and doesn't touch
+other files.
 
-### Use a different model for review
-
-Review should run on a different model from implement, so that the review is
-independent and a model isn't marking its own work. The installers don't set
-models, so after you install, set one in the installed review agent:
-
-- Claude Code: add `model:` to the frontmatter of `~/.claude/agents/review.md`.
-- Codex: add `model = "..."` to `~/.codex/agents/review.toml`.
-- Copilot: add `model:` to the frontmatter of `~/.copilot/agents/review.agent.md`.
-
-Installing again overwrites these edits, so set the model again after each
-install.
+Codex loads project agents only in a trusted project. Trust the project when
+Codex asks, or add it under `[projects]` in `~/.codex/config.toml`. Codex reads
+profiles only from its home directory (`$CODEX_HOME`, by default `~/.codex`),
+so Hugo's profile is always installed there, even for a project install.
 
 ## Usage
 
@@ -74,28 +88,25 @@ claude --agent hugo
 ```
 
 To make Hugo the default for a project, add `"agent": "hugo"` to that
-project's `.claude/settings.json`. Hugo has no `Write`/`Edit` tools, so it
-must delegate code changes to the other roles.
+project's `.claude/settings.json`. Hugo and review have no `Write`/`Edit`
+tools, so Hugo must delegate code changes and review can't fix what it
+reviews.
 
 ### Codex CLI
 
-Codex can't start a session as a custom agent. Instead, pass Hugo's
-instructions to the main session:
+Codex can't start a session as a custom agent, so Hugo is a Codex profile
+instead. The profile sets Hugo's model and gives the session Hugo's
+instructions:
 
 ```bash
-codex -c "developer_instructions=$(cat ~/.codex/hugo.md)"
+codex -p hugo
 ```
 
-A shell alias makes this easier:
-
-```bash
-alias hugo='codex -c "developer_instructions=$(cat ~/.codex/hugo.md)"'
-```
-
-Hugo then spawns `triage`, `plan`, `implement`, and `review` from
-`~/.codex/agents`. Spawned agents take their sandbox from the session, so
-start it with write access (the default `workspace-write` is enough). Hugo's
-rule against editing code is enforced only by its instructions on Codex.
+Hugo then spawns `triage`, `plan`, `implement`, and `review` from the
+project's `.codex/agents` or from `~/.codex/agents`. Spawned agents take
+their sandbox from the session, so start it with write access (the default
+`workspace-write` is enough). On Codex, the rules against Hugo and review
+editing code are enforced only by their instructions.
 
 ### GitHub Copilot CLI
 
@@ -104,5 +115,6 @@ copilot --agent hugo
 ```
 
 You can also run `/agent` inside an interactive session and choose `hugo`.
-Hugo's tool list leaves out `edit`, so it must delegate code changes to the
-other roles.
+The other roles are hidden from that picker, because only Hugo dispatches
+them. Hugo's and review's tool lists leave out `edit`, so Hugo must delegate
+code changes and review can't fix what it reviews.

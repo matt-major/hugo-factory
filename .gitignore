@@ -3,10 +3,6 @@
 .vscode/
 .idea/
 
-# Python
-__pycache__/
-*.pyc
-
 # Local agent-tool settings
 .claude/
 .codex/
