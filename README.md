@@ -1,85 +1,115 @@
 # Hugo Factory
 
-A software factory: prompt-defined agents that take work from intake to pull
-request. Each supported tool has its own copy of the agents, in that tool's
-native format, with models chosen for that tool:
+Hugo is a set of coding agents that takes a piece of work from a rough request
+to a reviewed pull request. You describe a bug or feature to Hugo. It
+investigates, writes a plan you approve, has the change made and reviewed, and
+hands you a PR to merge.
 
-| Folder | For |
+It works with [Claude Code](https://code.claude.com),
+[Codex CLI](https://github.com/openai/codex), and
+[GitHub Copilot CLI](https://github.com/github/copilot-cli). The agents are
+plain prompt files, so there's nothing to build or run apart from the tool you
+already use.
+
+## How it works
+
+You only ever talk to Hugo. Behind it are four specialist agents, each with
+one job:
+
+| Agent | Job |
 | --- | --- |
-| `claude/agents/` | [Claude Code](https://code.claude.com) |
-| `codex/` | [Codex CLI](https://github.com/openai/codex) |
-| `copilot/agents/` | [GitHub Copilot CLI](https://github.com/github/copilot-cli) |
+| `hugo` | Talks to you and hands work to the other agents. Never edits code. |
+| `triage` | Investigates the request, reproduces it, and opens or updates the issue. |
+| `plan` | Asks you questions, writes the plan, and records it on the issue. |
+| `implement` | Makes the change, checks it works, and opens the PR. |
+| `review` | Reviews the PR adversarially and reports back to Hugo. Never edits code. |
 
-Read a role's file for what it actually does.
+A typical run goes triage, plan, implement, review. Hugo skips steps that
+aren't needed: a one-line fix doesn't need a plan, and a link to an open issue
+doesn't need triage. If review finds problems, Hugo sends the PR back to
+implement and reviews it again.
 
-| Role | Does |
-| --- | --- |
-| `hugo` | Talks to you, and dispatches the other roles. Never edits code. |
-| `triage` | Researches and reproduces the request, and creates or updates the issue. |
-| `plan` | Interviews you, writes the plan, and records it on the issue. |
-| `implement` | Makes the change, verifies it, and opens the PR. |
-| `review` | Reviews the PR adversarially, and reports findings to Hugo. |
+Hugo stops and waits for you when:
+
+- a plan is ready, because no code is written until you approve it
+- it, or one of the other agents, has a question for you
+- review raises something that's your call rather than a clear fix
+- the PR is reviewed and ready for you to merge, which ends the run
+
+Review runs on a different model from implement, so the code isn't checked by
+the same model that wrote it.
+
+## Quick start
+
+```bash
+git clone https://github.com/matt-major/hugo-factory.git
+cd your-project
+../hugo-factory/install.sh
+claude --agent hugo    # or: codex -p hugo, copilot --agent hugo
+```
+
+Then tell Hugo what you want done, for example "the login page 500s when the
+email has a plus sign", or paste a link to an issue.
 
 ## Requirements
 
-- At least one of Claude Code, Codex CLI, or GitHub Copilot CLI.
-- Bash, for the install script.
-- Access to the repository's forge and issue tracker from that tool (for
-  example the `gh` CLI or an MCP server), so the agents can open PRs and
-  update issues.
+- Claude Code, Codex CLI, or GitHub Copilot CLI (at least one)
+- Bash, to run the install script
+- Access to your forge and issue tracker from that tool, such as the `gh` CLI
+  or an MCP server, so the agents can open PRs and update issues
 
-## Install
+## Installation
 
-Clone this repository, then run the install script from the project you want
-to use the factory in:
+Run `install.sh` from inside the project you want to use Hugo in. It asks
+whether to install into that project or globally:
 
-```bash
-./install.sh
-```
-
-It asks where to install the agents:
-
-- **Project** (the default): into the current project (its git root, or the
-  current directory outside a git repository), so you can commit them and
-  share them with your team.
-- **Global**: into your home directory, so they are available in every
+- **Project** (the default) puts the agents in the project's git root, or the
+  current directory if it isn't a git repository. Commit them to share Hugo
+  with your team.
+- **Global** puts them in your home directory, so they're available in every
   project.
 
 | Tool | Project | Global |
 | --- | --- | --- |
 | Claude Code | `.claude/agents/` | `~/.claude/agents/` |
-| Codex CLI | `.codex/agents/`, plus the Hugo profile globally | `~/.codex/agents/` and `~/.codex/hugo.config.toml` |
+| Codex CLI | `.codex/agents/` | `~/.codex/agents/` |
 | Copilot CLI | `.github/agents/` | `~/.copilot/agents/` |
 
-It installs for every supported tool on your `PATH`. To install for specific
-tools only, name them: `install.sh claude codex`.
+By default the script installs for every supported tool it finds on your
+`PATH`. To pick specific tools, name them:
 
-| Option | Does |
+```bash
+install.sh claude codex
+```
+
+| Option | Effect |
 | --- | --- |
-| `-g`, `--global` | Install globally, without asking. |
-| `-p`, `--project` | Install into the current project, without asking. |
-| `-y`, `--yes` | Don't ask; install into the current project unless `-g` is given. The script also doesn't ask when its input isn't a terminal. |
-| `--link` | Symlink the files instead of copying them, so a `git pull` of this repository updates the installed agents. Don't commit symlinked agents to a project; they point into your clone. |
+| `-p`, `--project` | Install into the current project without asking. |
+| `-g`, `--global` | Install globally without asking. |
+| `-y`, `--yes` | Don't ask. Installs into the project unless `-g` is also given. The script also skips the question when it isn't run from a terminal. |
+| `--link` | Symlink the files instead of copying them, so a `git pull` in your clone updates the installed agents. |
 
-By default the script copies the files, so run it again after you pull
-changes. It overwrites installed copies of these agents, and doesn't touch
-other files.
+Don't commit symlinked agents. The links point into your clone and won't
+resolve for anyone else.
 
-Codex loads project agents only in a trusted project. Trust the project when
-Codex asks, or add it under `[projects]` in `~/.codex/config.toml`. Codex reads
-profiles only from its home directory (`$CODEX_HOME`, by default `~/.codex`),
-so Hugo's profile is always installed there, even for a project install.
+### Updating
+
+Pull this repository and run `install.sh` again, unless you installed with
+`--link`. The script overwrites its own agent files and leaves everything else
+alone.
+
+### Codex notes
+
+Codex only reads profiles from its home directory (`$CODEX_HOME`, which
+defaults to `~/.codex`), so Hugo's profile, `hugo.config.toml`, always goes
+there, even for a project install.
+
+Codex also only loads project agents in a trusted project. Trust the project
+when Codex asks, or add it under `[projects]` in `~/.codex/config.toml`.
 
 ## Usage
 
-In every tool, Hugo runs as the main session and you talk only to Hugo. Start
-it from inside the repository you want to work on, then describe the work: a
-bug, a feature, or a link to an existing issue. Hugo acknowledges the request,
-and then:
-
-- Asks you questions when it needs input.
-- Waits for your approval of a plan before any code is written.
-- Stops when it hands you a reviewed PR to merge yourself.
+Start Hugo from inside the repository you want to work on.
 
 ### Claude Code
 
@@ -87,26 +117,26 @@ and then:
 claude --agent hugo
 ```
 
-To make Hugo the default for a project, add `"agent": "hugo"` to that
-project's `.claude/settings.json`. Hugo and review have no `Write`/`Edit`
-tools, so Hugo must delegate code changes and review can't fix what it
-reviews.
+To make Hugo the default in a project, add `"agent": "hugo"` to the project's
+`.claude/settings.json`.
+
+Hugo and review don't have the `Write` or `Edit` tools, so Hugo has to hand
+code changes to implement, and review can't quietly fix what it's reviewing.
 
 ### Codex CLI
-
-Codex can't start a session as a custom agent, so Hugo is a Codex profile
-instead. The profile sets Hugo's model and gives the session Hugo's
-instructions:
 
 ```bash
 codex -p hugo
 ```
 
-Hugo then spawns `triage`, `plan`, `implement`, and `review` from the
-project's `.codex/agents` or from `~/.codex/agents`. Spawned agents take
-their sandbox from the session, so start it with write access (the default
-`workspace-write` is enough). On Codex, the rules against Hugo and review
-editing code are enforced only by their instructions.
+Codex can't start a session as a custom agent, so Hugo is a Codex profile. The
+profile sets the model and loads Hugo's instructions, and Hugo then starts the
+other agents from `.codex/agents/` or `~/.codex/agents/`.
+
+The other agents inherit the session's sandbox, so it needs write access. The
+default, `workspace-write`, is enough. Codex has no per-agent tool limits, so
+Hugo and review stay out of the code only because their instructions tell them
+to.
 
 ### GitHub Copilot CLI
 
@@ -114,7 +144,30 @@ editing code are enforced only by their instructions.
 copilot --agent hugo
 ```
 
-You can also run `/agent` inside an interactive session and choose `hugo`.
-The other roles are hidden from that picker, because only Hugo dispatches
-them. Hugo's and review's tool lists leave out `edit`, so Hugo must delegate
-code changes and review can't fix what it reviews.
+You can also pick `hugo` from `/agent` in an interactive session. The other
+agents are hidden from that list, since only Hugo should start them.
+
+Hugo's and review's tool lists leave out `edit`, for the same reason as in
+Claude Code.
+
+## Customizing
+
+Each tool has its own copy of the agents, written in that tool's format:
+
+```
+claude/agents/     Claude Code  (*.md)
+codex/agents/      Codex CLI    (*.toml)
+codex/hugo.config.toml          Hugo's Codex profile
+copilot/agents/    Copilot CLI  (*.agent.md)
+```
+
+Every file sets its own model and instructions. Edit them to change models or
+behaviour, then reinstall. If you change models, keep review on a different
+model from implement.
+
+The copies are maintained by hand. When you change how an agent behaves, make
+the same change in all three folders.
+
+## License
+
+[MIT](LICENSE)
